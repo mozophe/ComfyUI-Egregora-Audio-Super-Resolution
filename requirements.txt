@@ -1,5 +1,5 @@
 # Core
-numpy<=1.26.4
+numpy>=1.26,<2.6         # upper bound required by cupy-cuda13x; see CuPy note below
 scipy>=1.11
 soundfile>=0.12
 tqdm>=4.66
@@ -7,9 +7,27 @@ requests>=2.31
 huggingface_hub>=0.24
 
 # Models / processors used by your nodes
-fat-llama>=1.1.0
+fat-llama>=1.1.0         # hard-depends on cupy-cuda12x -- see CuPy note below
 fat-llama-fftw>=1.0.4.4
 pyrnnoise>=0.3.8
 nara-wpe>=0.0.9          # import name: nara_wpe
 deepfilternet>=0.5.6     # import name: df
 descript-audio-codec>=1.0.0
+
+# ---------------------------------------------------------------------------
+# CuPy (Fat Llama GPU node) is deliberately NOT pinned here.
+#
+# The correct wheel depends on the CUDA major your torch was built against --
+# cupy-cuda12x for CUDA 12, cupy-cuda13x for CUDA 13 -- and pip cannot express
+# "match whatever torch is installed". Worse, fat-llama pulls in cupy-cuda12x
+# transitively regardless. On a CUDA 13 install that wheel imports successfully
+# but dies on the first kernel launch, because CuPy loads nvrtc/cudart lazily:
+#     RuntimeError: CuPy failed to load nvrtc64_120_0.dll
+#
+# Run install.py after installing this file. Its ensure_cupy() reads
+# torch.version.cuda, removes the mismatched variant, and installs the right one.
+#
+# Known tension: deepfilternet declares numpy<2.0, but cupy-cuda13x requires
+# numpy>=2.0. No single pin satisfies both. DeepFilterNet works fine on numpy 2.x
+# in practice, so the bound above favours CuPy; expect a pip dependency warning.
+# ---------------------------------------------------------------------------

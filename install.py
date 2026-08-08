@@ -103,7 +103,9 @@ def try_fetch_weights():
 # ---------- New: model/runtime deps + warmups ----------
 def ensure_runtime_deps():
     # keep your requirements light; install optional bits here if missing
-    _ensure("numpy", pip_name="numpy<=1.26.4")
+    # Keep in sync with requirements.txt. The old <=1.26.4 cap would install a numpy
+    # that cupy-cuda13x rejects (it needs >=2.0), breaking the Fat Llama GPU node.
+    _ensure("numpy", pip_name="numpy>=1.26,<2.6")
     _ensure("soundfile")
     _ensure("tqdm")
     _ensure("requests")

@@ -20,7 +20,24 @@ license = {file = "LICENSE"}
 #     "Environment :: GPU :: Apple Metal",    # Apple Metal support
 # ]
 
-dependencies = ["# Core", "numpy>=1.26", "scipy>=1.11", "soundfile>=0.12", "tqdm>=4.66", "requests>=2.31", "huggingface_hub>=0.24", "# Models / processors used by your nodes", "fat-llama>=1.1.0", "fat-llama-fftw>=1.0.4.4", "pyrnnoise>=0.3.8", "nara-wpe>=0.0.9          # import name: nara_wpe", "deepfilternet>=0.5.6     # import name: df", "descript-audio-codec>=1.0.0"]
+# Must be valid PEP 508 specifiers: no comment lines, no trailing '#' comments.
+# Keep in sync with requirements.txt, which carries the explanatory notes.
+# CuPy is intentionally absent -- the right wheel depends on torch's CUDA major,
+# so install.py:ensure_cupy() selects it at install time.
+dependencies = [
+    "numpy>=1.26,<2.6",
+    "scipy>=1.11",
+    "soundfile>=0.12",
+    "tqdm>=4.66",
+    "requests>=2.31",
+    "huggingface_hub>=0.24",
+    "fat-llama>=1.1.0",
+    "fat-llama-fftw>=1.0.4.4",
+    "pyrnnoise>=0.3.8",
+    "nara-wpe>=0.0.9",
+    "deepfilternet>=0.5.6",
+    "descript-audio-codec>=1.0.0",
+]
 
 [project.urls]
 Repository = "https://github.com/lucasgattas/ComfyUI-Egregora-Audio-Super-Resolution"
