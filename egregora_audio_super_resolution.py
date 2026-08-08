@@ -27,7 +27,15 @@ def _custom_root() -> Path:
 
 def _models_dir() -> Path:
     # .../ComfyUI/models
-    return _custom_root().parents[2] / "models"
+    try:
+        # ComfyUI's own resolver — also honours extra_model_paths.yaml
+        import folder_paths  # type: ignore
+        return Path(folder_paths.models_dir)
+    except Exception:
+        # Standalone/CLI fallback. parents[1], not parents[2]: this file sits in
+        # ComfyUI/custom_nodes/<node>/, so parents[0]=custom_nodes, parents[1]=ComfyUI.
+        # parents[2] pointed one level *above* ComfyUI and scattered weights outside it.
+        return _custom_root().parents[1] / "models"
 
 def _audio_models_subdir(name: str) -> Path:
     d = _models_dir() / "audio" / name
@@ -277,7 +285,9 @@ class _FlashSRRunner:
         if env_repo:
             return Path(env_repo)
         # default: custom_nodes/ComfyUI-Egregora-Audio-Super-Resolution/deps/FlashSR_Inference
-        return _custom_root().parents[0] / "deps" / "FlashSR_Inference"
+        # (was parents[0], which put deps/ in custom_nodes/ — outside this node and
+        #  disagreeing with install.py, which uses PKG/"deps".)
+        return _custom_root() / "deps" / "FlashSR_Inference"
 
     def _ensure_weights(self):
         missing = [f for f in self.HF_FILES if not (self.ckpt_dir / f).exists()]

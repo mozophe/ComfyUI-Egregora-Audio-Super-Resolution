@@ -125,15 +125,58 @@ def ensure_runtime_deps():
     # Optional: SciPy for HQ resampler/metrics in the Eval Pack
     _ensure("scipy")
 
-    # Windows-only: NVIDIA runtime wheels for CuPy (Fat Llama GPU).
+    # CuPy for Fat Llama GPU. Must match the CUDA major that torch was built against —
+    # cupy-cuda12x looks for nvrtc64_120_0.dll and silently imports fine on a CUDA 13
+    # box, then dies on the first kernel launch.
+    ensure_cupy()
+
+
+def ensure_cupy():
+    try:
+        import torch
+    except Exception:
+        print("[Egregora] torch not importable; skipping CuPy setup.")
+        return
+
+    major = (torch.version.cuda or "").split(".")[0]
+    if not major:
+        print("[Egregora] torch is CPU-only; skipping CuPy setup (Fat Llama GPU needs CUDA).")
+        return
+
+    try:
+        import cupy
+        cupy.asnumpy(cupy.arange(2, dtype=cupy.float32) * 2)  # lazy DLL load; import alone proves nothing
+        print(f"[Egregora] CuPy {cupy.__version__} OK on CUDA {torch.version.cuda}")
+        return
+    except Exception as e:
+        print(f"[Egregora] CuPy unusable ({e}); reinstalling for CUDA {major}.x …")
+
+    # Every cupy-cudaNx wheel installs the same 'cupy' package, so the wrong one must go first.
+    for variant in ("cupy-cuda11x", "cupy-cuda12x", "cupy-cuda13x"):
+        if variant != f"cupy-cuda{major}x":
+            subprocess.call([sys.executable, "-m", "pip", "uninstall", "-y", variant])
+    _pip_install([f"cupy-cuda{major}x"])
+
+    # Only fetch the NVIDIA runtime wheels if CuPy still can't launch a kernel — a system
+    # CUDA toolkit on PATH already covers it on most ComfyUI installs, and these are ~1-2 GB.
+    try:
+        import cupy
+        cupy.asnumpy(cupy.arange(2, dtype=cupy.float32) * 2)
+        return
+    except Exception:
+        pass
+
     if sys.platform.startswith("win"):
-        _ensure("nvidia.cuda_runtime", pip_name="nvidia-cuda-runtime-cu12")
-        _ensure("nvidia.cuda_nvrtc", pip_name="nvidia-cuda-nvrtc-cu12")
-        _ensure("nvidia.cublas", pip_name="nvidia-cublas-cu12")
-        _ensure("nvidia.cufft", pip_name="nvidia-cufft-cu12")
-        _ensure("nvidia.curand", pip_name="nvidia-curand-cu12")
-        _ensure("nvidia.cusolver", pip_name="nvidia-cusolver-cu12")
-        _ensure("nvidia.cusparse", pip_name="nvidia-cusparse-cu12")
+        for mod, pkg in (
+            ("nvidia.cuda_runtime", "nvidia-cuda-runtime"),
+            ("nvidia.cuda_nvrtc", "nvidia-cuda-nvrtc"),
+            ("nvidia.cublas", "nvidia-cublas"),
+            ("nvidia.cufft", "nvidia-cufft"),
+            ("nvidia.curand", "nvidia-curand"),
+            ("nvidia.cusolver", "nvidia-cusolver"),
+            ("nvidia.cusparse", "nvidia-cusparse"),
+        ):
+            _ensure(mod, pip_name=f"{pkg}-cu{major}")
 
 def warmup_deepfilternet():
     try:

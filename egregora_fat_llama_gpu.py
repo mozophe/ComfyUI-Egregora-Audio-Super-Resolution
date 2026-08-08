@@ -3,6 +3,7 @@ import sys
 import time
 import tempfile
 import platform
+import sysconfig
 from pathlib import Path
 from typing import Tuple
 import numpy as np
@@ -82,16 +83,21 @@ def _normalize_audio_input(AUDIO=None, audio_path: str = "", audio_url: str = ""
 # ---------------- CUDA/CuPy wiring (Windows) ----------------
 
 def _wire_cuda_for_cupy_windows():
-    """
+    r"""
     On Windows portable installs, make NVIDIA pip-wheel DLLs & headers discoverable:
       • Add ...\site-packages\nvidia\<package>\bin to the DLL search path
       • Point CUDA_PATH to ...\site-packages\nvidia\cuda_runtime (has include/)
     Must run BEFORE importing cupy.
+
+    No-op when CUDA already resolves (system toolkit on PATH, or CuPy builds that
+    bundle their own runtime) — the pip-wheel wiring is only a fallback.
     """
     if platform.system() != "Windows":
         return
 
-    sp = Path(sys.executable).parent / "Lib" / "site-packages" / "nvidia"
+    # sysconfig, not sys.executable.parent: a venv puts python.exe in Scripts\,
+    # so the naive join yields venv\Scripts\Lib\site-packages (does not exist).
+    sp = Path(sysconfig.get_paths()["purelib"]) / "nvidia"
     rt = sp / "cuda_runtime"     # contains include/ and bin/
     nvrtc = sp / "cuda_nvrtc"    # contains bin/
     embed_rt = Path(__file__).resolve().parents[2] / "python_embeded" / "Lib" / "site-packages" / "nvidia" / "cuda_runtime"
@@ -129,34 +135,54 @@ def _wire_cuda_for_cupy_windows():
 
 # ---------------- Fat Llama wrapper ----------------
 
+def _cupy_kernel_error():
+    """
+    Return None if CuPy can launch a kernel, else the exception explaining why not.
+
+    `import cupy` alone proves nothing: CuPy loads nvrtc/cudart lazily, so a CUDA-version
+    mismatch imports fine and only dies on the first kernel launch — deep inside fat_llama.
+    Launch one here instead.
+    """
+    try:
+        import cupy
+        cupy.asnumpy(cupy.arange(2, dtype=cupy.float32) * 2)
+        return None
+    except Exception as e:
+        return e
+
+
 def _ensure_gpu_stack():
     """
     Validate CUDA/CuPy presence early and give a friendly error if not available.
-    Also ensure DLL search paths & headers are wired so CuPy can load cudart/nvrtc
-    and find CUDA runtime headers like vector_types.h.
     """
-    _wire_cuda_for_cupy_windows()
-
     if not torch.cuda.is_available():
         raise RuntimeError(
             "CUDA GPU not detected. Fat Llama (GPU) requires an NVIDIA GPU. "
             "If you need CPU, use the separate Fat Llama — CPU/FFTW node."
         )
 
-    try:
-        import cupy  # noqa: F401  (import after wiring)
-    except Exception as e:
-        cmd = (
-            "python_embeded\\python.exe -m pip install -U "
-            "nvidia-cuda-runtime-cu12 nvidia-cuda-nvrtc-cu12 nvidia-cublas-cu12 "
-            "nvidia-cufft-cu12 nvidia-curand-cu12 nvidia-cusolver-cu12 nvidia-cusparse-cu12 "
-            "cupy-cuda12x"
-        )
+    if _cupy_kernel_error() is None:
+        return
+
+    # Only now fall back to pip-wheel DLL wiring. Doing it eagerly would point
+    # CUDA_HOME at a stale nvidia/cuda_runtime wheel that may be a different CUDA
+    # major than the system toolkit already on PATH.
+    _wire_cuda_for_cupy_windows()
+
+    err = _cupy_kernel_error()
+    if err is not None:
+        want = (torch.version.cuda or "12").split(".")[0]
+        pkg = f"cupy-cuda{want}x"
         raise RuntimeError(
-            "CuPy failed to import or locate the CUDA runtime. "
-            "Install the NVIDIA runtime wheels and CuPy in the embedded Python, then restart ComfyUI.\n"
-            f"Command: {cmd}"
-        ) from e
+            "CuPy is unusable — it imported but could not launch a CUDA kernel. "
+            f"Usually a CUDA-version mismatch: this torch is built for CUDA {torch.version.cuda}, "
+            f"so CuPy must be '{pkg}'.\n"
+            f"Fix: pip uninstall -y cupy-cuda12x cupy-cuda13x && pip install {pkg}\n"
+            "Then restart ComfyUI. If you have no system CUDA toolkit, also install the "
+            f"matching nvidia-*-cu{want} runtime wheels (nvrtc, cufft, cublas, curand, "
+            "cusolver, cusparse).\n"
+            f"Underlying error: {err}"
+        ) from err
 
 def _fat_llama_upscale(
     in_wav: Path,
